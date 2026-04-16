@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kanade | Robotics Portfolio</title>
+    <meta
+      name="description"
+      content="Kanade 的个人主页：RMer、XJTLU undergraduate student、SIP IR724。"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <canvas id="bg-canvas" aria-hidden="true"></canvas>
+    <div class="noise-layer" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#top">KANADE</a>
+      <nav class="nav" aria-label="主导航">
+        <a href="#about">About</a>
+        <a href="#lab">Lab</a>
+        <a href="#gallery">Gallery</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero section-reveal">
+        <p class="hero-tag">XJTLU Undergraduate Student · RMer</p>
+        <h1>Build Vision. Make Robots Move.</h1>
+        <p class="hero-desc">
+          我是 Kanade，专注机器人视觉与决策。把算法、工程和比赛现场连接起来，让机器在复杂环境里稳定感知与行动。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#gallery">看作品</a>
+          <a class="btn btn-ghost" href="https://github.com/kanade724" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </section>
+
+      <section id="about" class="grid section-reveal">
+        <article class="card">
+          <h2>About Me</h2>
+          <p>
+            热爱 RoboMaster，偏好把“能跑起来”的工程结果放在第一位。关注多目标跟踪、感知稳定性、系统联调与落地性能。
+          </p>
+        </article>
+        <article id="lab" class="card accent">
+          <h2>Laboratory</h2>
+          <p>SIP IR724</p>
+          <p class="small">Vision · Decision · Competition Engineering</p>
+        </article>
+      </section>
+
+      <section id="gallery" class="section-reveal">
+        <div class="section-title-row">
+          <h2>Moments & Work</h2>
+          <span>现场 / 调试 / 竞赛记录</span>
+        </div>
+        <div class="gallery">
+          <figure class="gallery-item"><img src="picture/6677bbbd660607121c53d947d5ec2cb.jpg" alt="Robotics photo 1" loading="lazy" /></figure>
+          <figure class="gallery-item"><img src="picture/6729a7d656836edf19baf74d9f3e607.jpg" alt="Robotics photo 2" loading="lazy" /></figure>
+          <figure class="gallery-item"><img src="picture/a08be473622b7af8668854be02137e8.jpg" alt="Robotics photo 3" loading="lazy" /></figure>
+          <figure class="gallery-item"><img src="picture/cf1378fd1008dc738fe952fee330bbc.jpg" alt="Robotics photo 4" loading="lazy" /></figure>
+        </div>
+      </section>
+    </main>
+
+    <footer class="section-reveal">
+      <p>© 2026 Kanade · Keep Shipping</p>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
