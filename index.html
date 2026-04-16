@@ -62,10 +62,26 @@
           <span>现场 / 调试 / 竞赛记录</span>
         </div>
         <div class="gallery">
-          <figure class="gallery-item"><img src="picture/6677bbbd660607121c53d947d5ec2cb.jpg" alt="Robotics photo 1" loading="lazy" /></figure>
-          <figure class="gallery-item"><img src="picture/6729a7d656836edf19baf74d9f3e607.jpg" alt="Robotics photo 2" loading="lazy" /></figure>
-          <figure class="gallery-item"><img src="picture/a08be473622b7af8668854be02137e8.jpg" alt="Robotics photo 3" loading="lazy" /></figure>
-          <figure class="gallery-item"><img src="picture/cf1378fd1008dc738fe952fee330bbc.jpg" alt="Robotics photo 4" loading="lazy" /></figure>
+          <figure class="gallery-item">
+            <button class="gallery-open" type="button" aria-label="查看大图 1">
+              <img src="picture/6677bbbd660607121c53d947d5ec2cb.jpg" alt="Robotics photo 1" loading="lazy" />
+            </button>
+          </figure>
+          <figure class="gallery-item">
+            <button class="gallery-open" type="button" aria-label="查看大图 2">
+              <img src="picture/6729a7d656836edf19baf74d9f3e607.jpg" alt="Robotics photo 2" loading="lazy" />
+            </button>
+          </figure>
+          <figure class="gallery-item">
+            <button class="gallery-open" type="button" aria-label="查看大图 3">
+              <img src="picture/a08be473622b7af8668854be02137e8.jpg" alt="Robotics photo 3" loading="lazy" />
+            </button>
+          </figure>
+          <figure class="gallery-item">
+            <button class="gallery-open" type="button" aria-label="查看大图 4">
+              <img src="picture/cf1378fd1008dc738fe952fee330bbc.jpg" alt="Robotics photo 4" loading="lazy" />
+            </button>
+          </figure>
         </div>
       </section>
     </main>
@@ -73,6 +89,13 @@
     <footer class="section-reveal">
       <p>© 2026 Kanade · Keep Shipping</p>
     </footer>
+
+    <div class="lightbox" id="lightbox" aria-hidden="true">
+      <button class="lightbox-close" type="button" aria-label="关闭预览">×</button>
+      <button class="lightbox-nav lightbox-prev" type="button" aria-label="上一张">‹</button>
+      <img class="lightbox-image" src="" alt="" />
+      <button class="lightbox-nav lightbox-next" type="button" aria-label="下一张">›</button>
+    </div>
 
     <script src="script.js"></script>
   </body>

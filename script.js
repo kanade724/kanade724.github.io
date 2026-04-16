@@ -115,4 +115,84 @@
 
   syncActiveNav();
   window.addEventListener("scroll", syncActiveNav, { passive: true });
+
+  const galleryButtons = Array.from(document.querySelectorAll(".gallery-open"));
+  const lightbox = document.getElementById("lightbox");
+  const lightboxImage = lightbox ? lightbox.querySelector(".lightbox-image") : null;
+  const closeButton = lightbox ? lightbox.querySelector(".lightbox-close") : null;
+  const prevButton = lightbox ? lightbox.querySelector(".lightbox-prev") : null;
+  const nextButton = lightbox ? lightbox.querySelector(".lightbox-next") : null;
+
+  if (galleryButtons.length && lightbox && lightboxImage && closeButton && prevButton && nextButton) {
+    const galleryData = galleryButtons
+      .map((button) => {
+        const image = button.querySelector("img");
+        if (!image) return null;
+        return {
+          src: image.currentSrc || image.src,
+          alt: image.alt || "Gallery image"
+        };
+      })
+      .filter(Boolean);
+
+    let currentIndex = 0;
+    let lastFocused = null;
+
+    const renderLightbox = () => {
+      const item = galleryData[currentIndex];
+      lightboxImage.src = item.src;
+      lightboxImage.alt = item.alt;
+    };
+
+    const openLightbox = (index) => {
+      currentIndex = index;
+      renderLightbox();
+      lightbox.classList.add("show");
+      lightbox.setAttribute("aria-hidden", "false");
+      document.body.classList.add("lightbox-open");
+      lastFocused = document.activeElement;
+      closeButton.focus();
+    };
+
+    const closeLightbox = () => {
+      lightbox.classList.remove("show");
+      lightbox.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("lightbox-open");
+      lightboxImage.src = "";
+      if (lastFocused && typeof lastFocused.focus === "function") {
+        lastFocused.focus();
+      }
+    };
+
+    const showPrev = () => {
+      currentIndex = (currentIndex - 1 + galleryData.length) % galleryData.length;
+      renderLightbox();
+    };
+
+    const showNext = () => {
+      currentIndex = (currentIndex + 1) % galleryData.length;
+      renderLightbox();
+    };
+
+    galleryButtons.forEach((button, index) => {
+      button.addEventListener("click", () => openLightbox(index));
+    });
+
+    closeButton.addEventListener("click", closeLightbox);
+    prevButton.addEventListener("click", showPrev);
+    nextButton.addEventListener("click", showNext);
+
+    lightbox.addEventListener("click", (event) => {
+      if (event.target === lightbox) {
+        closeLightbox();
+      }
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (!lightbox.classList.contains("show")) return;
+      if (event.key === "Escape") closeLightbox();
+      if (event.key === "ArrowLeft") showPrev();
+      if (event.key === "ArrowRight") showNext();
+    });
+  }
 })();
