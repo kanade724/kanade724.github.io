@@ -25,6 +25,9 @@ const SUPABASE_URL = "https://jbiedctytmrxzelmdwxg.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_uJzr69moclWUdROUr5Q4tg_ge3r-PN5";
 const MANUAL_SYNC_TABLE = "rm_rooms_v2";
 const FAST_POSITION_SYNC_MODE = true;
+const MANUAL_SYNC_TIMEOUT_BASE_MS = 12000;
+const MANUAL_SYNC_TIMEOUT_MAX_MS = 90000;
+const MANUAL_SYNC_TIMEOUT_PER_KB_MS = 20;
 const ROOM_ID = (() => {
   const value = new URLSearchParams(window.location.search).get("room") || "public-demo";
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
@@ -387,6 +390,8 @@ const refs = {
   addBlueRosterBtn: document.querySelector("#addBlueRosterBtn"),
   syncPushBtn: document.querySelector("#syncPushBtn"),
   syncPullBtn: document.querySelector("#syncPullBtn"),
+  syncPushBtnMode: document.querySelector("#syncPushBtnMode"),
+  syncPullBtnMode: document.querySelector("#syncPullBtnMode"),
   syncProgressWrap: document.querySelector("#syncProgressWrap"),
   syncProgressBar: document.querySelector("#syncProgressBar"),
   syncProgressLabel: document.querySelector("#syncProgressLabel"),
@@ -966,8 +971,17 @@ function normalizeUnit(unit) {
 }
 
 function applySnapshot(snapshot, options = {}) {
-  const { renderUI = true } = options;
+  const { renderUI = true, keepBackgroundIfMissing = true } = options;
   const normalized = normalizeSnapshot(snapshot);
+  const currentBackground = state.board && typeof state.board.backgroundImage === "string"
+    ? state.board.backgroundImage
+    : "";
+
+  // Manual-sync fast mode may intentionally strip background from remote snapshots.
+  // If incoming snapshot has no background, preserve current local background.
+  if (keepBackgroundIfMissing && !normalized.board.backgroundImage && currentBackground) {
+    normalized.board.backgroundImage = currentBackground;
+  }
 
   state.board = normalized.board;
   state.units = normalized.units;
@@ -984,9 +998,9 @@ function applySnapshot(snapshot, options = {}) {
 }
 
 function applyAppPayload(payload, options = {}) {
-  const { renderUI = true } = options;
+  const { renderUI = true, keepBackgroundIfMissing = true } = options;
 
-  applySnapshot(payload, { renderUI: false });
+  applySnapshot(payload, { renderUI: false, keepBackgroundIfMissing });
   state.modes = Array.isArray(payload && payload.modes) ? payload.modes.map(normalizeMode) : [];
   state.selectedModeId = state.modes.some((mode) => mode.id === (payload && payload.selectedModeId))
     ? payload.selectedModeId
@@ -1030,15 +1044,12 @@ function createManualSyncPayload() {
   const payload = createPortablePayload();
 
   // Keep collaboration payload lightweight.
-  // Fast mode focuses on unit/timeline synchronization and skips heavy assets.
+  // Fast mode skips heavy assets, but keeps tactical modes synchronized.
   if (FAST_POSITION_SYNC_MODE) {
     payload.board = {
       ...payload.board,
       backgroundImage: "",
     };
-    payload.modes = [];
-    payload.selectedModeId = null;
-    payload.modeDraftName = "";
   }
 
   payload.boardIcons = Object.keys(payload.boardIcons || {}).reduce((acc, key) => {
@@ -1046,7 +1057,42 @@ function createManualSyncPayload() {
     return acc;
   }, {});
 
+  // Tactical modes can become very large if snapshots include base64 background/icons.
+  // Keep only tactical core data for cloud sync.
+  payload.modes = (payload.modes || []).map((mode) => {
+    const sanitized = cloneValue(mode);
+    if (!sanitized || !sanitized.snapshot) {
+      return sanitized;
+    }
+    sanitized.snapshot.units = Array.isArray(sanitized.snapshot.units)
+      ? sanitized.snapshot.units.map((unit) => ({
+          // Keep tactical essentials only; normalizeUnit() reconstructs defaults on pull.
+          presetId: unit.presetId,
+          team: unit.team,
+          name: unit.name || "",
+          note: unit.note || "",
+          x: unit.x,
+          y: unit.y,
+          route: Array.isArray(unit.route)
+            ? unit.route.map((point) => ({ x: point.x, y: point.y }))
+            : [],
+        }))
+      : [];
+    if (sanitized.snapshot.board) {
+      sanitized.snapshot.board.backgroundImage = "";
+    }
+    sanitized.snapshot.boardIcons = {};
+    return sanitized;
+  });
+
   return payload;
+}
+
+function calcManualSyncTimeoutMs(payloadSizeKb, hasModesPatch) {
+  const kb = Number(payloadSizeKb) || 0;
+  const base = MANUAL_SYNC_TIMEOUT_BASE_MS + (kb * MANUAL_SYNC_TIMEOUT_PER_KB_MS);
+  const modeBonus = hasModesPatch ? 12000 : 0;
+  return Math.min(MANUAL_SYNC_TIMEOUT_MAX_MS, Math.max(MANUAL_SYNC_TIMEOUT_BASE_MS, base + modeBonus));
 }
 
 function payloadToManualSyncDoc(payload) {
@@ -1080,7 +1126,7 @@ function buildManualSyncPatch(nextDoc) {
   }
 
   const keys = FAST_POSITION_SYNC_MODE
-    ? ["timeline_seconds", "units"]
+    ? ["timeline_seconds", "units", "modes", "selected_mode_id", "mode_draft_name"]
     : ["board", "timeline_seconds", "units", "modes", "selected_mode_id", "mode_draft_name"];
   const patch = {};
   keys.forEach((key) => {
@@ -1262,7 +1308,7 @@ async function pushStateManually() {
   }
 
   if (remoteVersion < 0) {
-    refs.boardHint.textContent = `房间：${ROOM_ID}（请先点“手动刷新同步”再上传）`;
+    refs.boardHint.textContent = `房间：${ROOM_ID}（请先点“刷新”再上传）`;
     failSyncProgress("请先刷新后再上传");
     return;
   }
@@ -1281,6 +1327,7 @@ async function pushStateManually() {
   const payloadSizeKb = Math.round(new Blob([JSON.stringify(patch)]).size / 1024);
   updateSyncProgress(`上传中... ${payloadSizeKb}KB`, 30);
   refs.boardHint.textContent = `房间：${ROOM_ID}（正在上传... ${payloadSizeKb}KB / ${patchFields.length}项）`;
+  const timeoutMs = calcManualSyncTimeoutMs(payloadSizeKb, patchFields.includes("modes"));
 
   let data = null;
   let error = null;
@@ -1293,7 +1340,7 @@ async function pushStateManually() {
         .eq("room_id", ROOM_ID)
         .eq("version", remoteVersion)
         .select("version"),
-      12000,
+      timeoutMs,
       "manual push"
     );
     data = result.data;
@@ -1313,7 +1360,7 @@ async function pushStateManually() {
   }
 
   if (!data || data.length === 0) {
-    refs.boardHint.textContent = `房间：${ROOM_ID}（远端已变更，请先“手动刷新同步”）`;
+    refs.boardHint.textContent = `房间：${ROOM_ID}（远端已变更，请先“刷新”）`;
     failSyncProgress("远端已变更，请先刷新");
     return;
   }
@@ -1322,7 +1369,7 @@ async function pushStateManually() {
   remoteVersion = Number(data[0].version) || remoteVersion;
   manualSyncBaselineDoc = nextDoc;
   lastSyncedSnapshot = toSnapshotText(payload);
-  refs.boardHint.textContent = `房间：${ROOM_ID}（已手动上传，约 ${payloadSizeKb}KB）`;
+  refs.boardHint.textContent = `房间：${ROOM_ID}（已上传，约 ${payloadSizeKb}KB）`;
   completeSyncProgress("上传完成");
 }
 
@@ -1405,9 +1452,6 @@ async function pullStateManually() {
   const mergedState = manualSyncDocToPayload(doc);
   if (FAST_POSITION_SYNC_MODE) {
     mergedState.board = cloneValue(state.board);
-    mergedState.modes = cloneValue(state.modes);
-    mergedState.selectedModeId = state.selectedModeId;
-    mergedState.modeDraftName = state.modeDraftName;
   } else if (!mergedState.board.backgroundImage && state.board && state.board.backgroundImage) {
     mergedState.board.backgroundImage = state.board.backgroundImage;
   }
@@ -1421,7 +1465,7 @@ async function pullStateManually() {
   manualSyncBaselineDoc = payloadToManualSyncDoc(mergedState);
   lastSyncedSnapshot = toSnapshotText(mergedState);
   persistToLocal();
-  refs.boardHint.textContent = `房间：${ROOM_ID}（已手动刷新）`;
+  refs.boardHint.textContent = `房间：${ROOM_ID}（已刷新）`;
   completeSyncProgress("刷新完成");
 }
 
@@ -2777,16 +2821,20 @@ function bindActions() {
     refs.boardHint.textContent = "已恢复到内置默认方案。";
   });
   refs.exportOfflineBtn.addEventListener("click", exportOfflinePackage);
-  if (refs.syncPushBtn) {
-    refs.syncPushBtn.addEventListener("click", () => {
-      void pushStateManually();
-    });
-  }
-  if (refs.syncPullBtn) {
-    refs.syncPullBtn.addEventListener("click", () => {
-      void pullStateManually();
-    });
-  }
+  const bindSyncButtons = (pushBtn, pullBtn) => {
+    if (pushBtn) {
+      pushBtn.addEventListener("click", () => {
+        void pushStateManually();
+      });
+    }
+    if (pullBtn) {
+      pullBtn.addEventListener("click", () => {
+        void pullStateManually();
+      });
+    }
+  };
+  bindSyncButtons(refs.syncPushBtn, refs.syncPullBtn);
+  bindSyncButtons(refs.syncPushBtnMode, refs.syncPullBtnMode);
   if (refs.goHomeBtn) {
     refs.goHomeBtn.addEventListener("click", () => {
       window.location.href = "../index.html";
@@ -2913,7 +2961,7 @@ function init() {
   }
   render();
   refs.boardHint.textContent = FAST_POSITION_SYNC_MODE
-    ? `房间：${ROOM_ID}（位置极速同步：仅单位/时间轴）`
+    ? `房间：${ROOM_ID}（位置极速同步：单位/时间轴/战术模式）`
     : `房间：${ROOM_ID}（手动同步模式：上传/刷新）`;
   void bootstrapManualSync();
 }
