@@ -233,13 +233,19 @@ const TIMELINE_LANES = [
     ],
   },
   {
-    id: "air-ammo",
-    label: "无人机发弹量",
+    id: "air-support",
+    label: "空中支援时间",
     segments: [
-      { start: 0, end: MATCH_DURATION_SECONDS, label: "开局自带 750 发 17mm；比赛中不可额外兑换", tone: "air-ammo" },
+      { start: 0, end: MATCH_DURATION_SECONDS, label: "开局 30 秒；此后每分钟额外 +20 秒", tone: "air-support" },
     ],
     markers: [
-      { time: 0, short: "750", title: "空中机器人开局初始允许发弹量为 750 发 17mm" },
+      { time: 0, short: "+30s", title: "比赛开始时，空中机器人拥有 30 秒空中支援时间" },
+      { time: 60, short: "+20s", title: "1:00 获得额外 20 秒空中支援时间" },
+      { time: 120, short: "+20s", title: "2:00 获得额外 20 秒空中支援时间" },
+      { time: 180, short: "+20s", title: "3:00 获得额外 20 秒空中支援时间" },
+      { time: 240, short: "+20s", title: "4:00 获得额外 20 秒空中支援时间" },
+      { time: 300, short: "+20s", title: "5:00 获得额外 20 秒空中支援时间" },
+      { time: 360, short: "+20s", title: "6:00 获得额外 20 秒空中支援时间" },
     ],
   },
   {
@@ -1387,6 +1393,8 @@ function buildTimelineStatusItems(currentSeconds) {
   const bigEnergyIssued = countIssuedOpportunities([180, 255, 330], currentSeconds);
   const dartIssued = countIssuedOpportunities([30, 240], currentSeconds);
   const sentrySupplyIssued = countIssuedOpportunities([60, 120, 180, 240, 300, 360], currentSeconds);
+  const airSupportIssued = countIssuedOpportunities([60, 120, 180, 240, 300, 360], currentSeconds);
+  const airSupportSeconds = 30 + airSupportIssued * 20;
 
   return [
     currentSeconds < 180
@@ -1432,8 +1440,8 @@ function buildTimelineStatusItems(currentSeconds) {
         : "首个每分钟补给节点在 1:00 到来，此后每分钟增加 100 发可累计补给。",
     },
     {
-      title: "无人机发弹量",
-      text: "空中机器人开局自带 750 发 17mm 允许发弹量；七分钟比赛阶段不能通过补给区、增益点或远程方式额外兑换。",
+      title: "空中支援时间",
+      text: `当前理论累计 ${airSupportSeconds} 秒空中支援时间：开局 30 秒，此后每 1 分钟额外获得 20 秒；耗尽后若未暂停，额外支援时间按 1 金币 / 1 秒消耗。`,
     },
     currentSeconds >= 360
       ? {
