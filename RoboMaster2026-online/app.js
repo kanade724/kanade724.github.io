@@ -28,7 +28,32 @@ const ROOM_ID = (() => {
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
   return sanitized || "public-demo";
 })();
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const IS_LOCAL_PREVIEW = ["127.0.0.1", "localhost"].includes(window.location.hostname);
+const REALTIME_PREF_KEY = "rm2026-online-realtime-enabled";
+const ENABLE_REALTIME = (() => {
+  const value = new URLSearchParams(window.location.search).get("realtime");
+  if (value === "1" || value === "true") {
+    return true;
+  }
+  if (value === "0" || value === "false") {
+    return false;
+  }
+  try {
+    const saved = localStorage.getItem(REALTIME_PREF_KEY);
+    if (saved === "1") {
+      return true;
+    }
+    if (saved === "0") {
+      return false;
+    }
+  } catch (error) {
+    console.warn("读取实时协作偏好失败", error);
+  }
+  return !IS_LOCAL_PREVIEW;
+})();
+const supabaseClient = (window.supabase && typeof window.supabase.createClient === "function")
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
 
 function createDefaultBoardState() {
   return {
@@ -288,6 +313,7 @@ let isApplyingRemote = false;
 let lastSyncedSnapshot = "";
 let syncTimer = null;
 let roomChannel = null;
+let realtimeEnabled = ENABLE_REALTIME;
 
 let pendingBoardIconSlot = null;
 
@@ -352,6 +378,7 @@ const refs = {
   seedDemoBtn: document.querySelector("#seedDemoBtn"),
   addRedRosterBtn: document.querySelector("#addRedRosterBtn"),
   addBlueRosterBtn: document.querySelector("#addBlueRosterBtn"),
+  realtimeToggleBtn: document.querySelector("#realtimeToggleBtn"),
   goHomeBtn: document.querySelector("#goHomeBtn"),
   uploadBackgroundBtn: document.querySelector("#uploadBackgroundBtn"),
   clearBackgroundBtn: document.querySelector("#clearBackgroundBtn"),
@@ -938,7 +965,30 @@ function toSnapshotText(payload) {
   return JSON.stringify(payload);
 }
 
+function updateRealtimeToggleButton() {
+  if (!refs.realtimeToggleBtn) {
+    return;
+  }
+  refs.realtimeToggleBtn.textContent = realtimeEnabled ? "实时协作：开" : "实时协作：关";
+  refs.realtimeToggleBtn.classList.toggle("primary-btn", realtimeEnabled);
+  refs.realtimeToggleBtn.classList.toggle("ghost-btn", !realtimeEnabled);
+}
+
+function disconnectRealtimeChannel() {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  if (supabaseClient && roomChannel) {
+    supabaseClient.removeChannel(roomChannel);
+    roomChannel = null;
+  }
+}
+
 function scheduleRealtimeSync() {
+  if (!realtimeEnabled || !supabaseClient) {
+    return;
+  }
   if (isApplyingRemote) {
     return;
   }
@@ -952,13 +1002,13 @@ function scheduleRealtimeSync() {
 
 async function ensureRoomExists() {
   const seed = createPortablePayload();
-  await supabase
+  await supabaseClient
     .from("rm_rooms")
     .upsert({ room_id: ROOM_ID, state: seed }, { onConflict: "room_id", ignoreDuplicates: true });
 }
 
 async function loadRoomState() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from("rm_rooms")
     .select("state,version")
     .eq("room_id", ROOM_ID)
@@ -986,7 +1036,7 @@ async function pushStateToRoom() {
     return;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from("rm_rooms")
     .update({ state: payload })
     .eq("room_id", ROOM_ID)
@@ -1003,7 +1053,7 @@ async function pushStateToRoom() {
 }
 
 function subscribeRoomChanges() {
-  roomChannel = supabase
+  roomChannel = supabaseClient
     .channel(`rm-room-${ROOM_ID}`)
     .on(
       "postgres_changes",
@@ -1041,7 +1091,19 @@ function subscribeRoomChanges() {
 }
 
 async function initRealtimeCollaboration() {
+  if (!realtimeEnabled) {
+    disconnectRealtimeChannel();
+    refs.boardHint.textContent = `房间：${ROOM_ID}（本地演示模式，实时协作已关闭）`;
+    return;
+  }
+
+  if (!supabaseClient) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作库未加载，当前仅本地模式）`;
+    return;
+  }
+
   try {
+    disconnectRealtimeChannel();
     await ensureRoomExists();
     await loadRoomState();
     subscribeRoomChanges();
@@ -2372,6 +2434,26 @@ function bindActions() {
     refs.boardHint.textContent = "已恢复到内置默认方案。";
   });
   refs.exportOfflineBtn.addEventListener("click", exportOfflinePackage);
+  if (refs.realtimeToggleBtn) {
+    updateRealtimeToggleButton();
+    refs.realtimeToggleBtn.addEventListener("click", () => {
+      realtimeEnabled = !realtimeEnabled;
+      try {
+        localStorage.setItem(REALTIME_PREF_KEY, realtimeEnabled ? "1" : "0");
+      } catch (error) {
+        console.warn("保存实时协作偏好失败", error);
+      }
+      updateRealtimeToggleButton();
+
+      if (!realtimeEnabled) {
+        disconnectRealtimeChannel();
+        refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作已手动关闭）`;
+        return;
+      }
+
+      void initRealtimeCollaboration();
+    });
+  }
   if (refs.goHomeBtn) {
     refs.goHomeBtn.addEventListener("click", () => {
       window.location.href = "../index.html";
@@ -2472,10 +2554,7 @@ function bindActions() {
 
   window.addEventListener("beforeunload", () => {
     persistToLocal();
-    if (roomChannel) {
-      supabase.removeChannel(roomChannel);
-      roomChannel = null;
-    }
+    disconnectRealtimeChannel();
   });
 }
 
