@@ -314,6 +314,8 @@ let lastSyncedSnapshot = "";
 let syncTimer = null;
 let roomChannel = null;
 let realtimeEnabled = ENABLE_REALTIME;
+let isPushInFlight = false;
+let hasPendingPush = false;
 
 let pendingBoardIconSlot = null;
 
@@ -962,7 +964,9 @@ function createPortablePayload() {
 }
 
 function toSnapshotText(payload) {
-  return JSON.stringify(payload);
+  // Drop volatile field to avoid treating every render as a state change.
+  const { savedAt, ...stablePayload } = payload;
+  return JSON.stringify(stablePayload);
 }
 
 function updateRealtimeToggleButton() {
@@ -979,6 +983,8 @@ function disconnectRealtimeChannel() {
     clearTimeout(syncTimer);
     syncTimer = null;
   }
+  hasPendingPush = false;
+  isPushInFlight = false;
   if (supabaseClient && roomChannel) {
     supabaseClient.removeChannel(roomChannel);
     roomChannel = null;
@@ -1029,6 +1035,9 @@ async function pushStateToRoom() {
   if (isApplyingRemote) {
     return;
   }
+  if (!realtimeEnabled || !supabaseClient) {
+    return;
+  }
 
   const payload = createPortablePayload();
   const text = toSnapshotText(payload);
@@ -1036,20 +1045,34 @@ async function pushStateToRoom() {
     return;
   }
 
-  const { data, error } = await supabaseClient
-    .from("rm_rooms")
-    .update({ state: payload })
-    .eq("room_id", ROOM_ID)
-    .select("version")
-    .single();
-
-  if (error) {
-    console.warn("实时同步失败", error);
+  if (isPushInFlight) {
+    hasPendingPush = true;
     return;
   }
 
-  lastSyncedSnapshot = text;
-  remoteVersion = Number(data && data.version) || remoteVersion;
+  isPushInFlight = true;
+  try {
+    const { data, error } = await supabaseClient
+      .from("rm_rooms")
+      .update({ state: payload })
+      .eq("room_id", ROOM_ID)
+      .select("version")
+      .single();
+
+    if (error) {
+      console.warn("实时同步失败", error);
+      return;
+    }
+
+    lastSyncedSnapshot = text;
+    remoteVersion = Number(data && data.version) || remoteVersion;
+  } finally {
+    isPushInFlight = false;
+    if (hasPendingPush) {
+      hasPendingPush = false;
+      void pushStateToRoom();
+    }
+  }
 }
 
 function subscribeRoomChanges() {
