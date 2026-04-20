@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoboMaster 2026 战术沙盘</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">TACTICAL SANDBOX</p>
+        <h1>RoboMaster 2026 战术沙盘</h1>
+        <p class="subtitle">放置兵种、绘制路线、保存方案，适合赛前推演与临场复盘。</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="goHomeBtn" class="ghost-btn">返回个人主页</button>
+        <button id="seedDemoBtn" class="ghost-btn">示例部署</button>
+        <button id="loadBundleBtn" class="ghost-btn">恢复离线包默认方案</button>
+        <button id="exportOfflineBtn" class="ghost-btn">导出当前离线包</button>
+        <button id="saveLocalBtn" class="ghost-btn">保存到本地</button>
+        <button id="exportBtn" class="primary-btn">导出方案</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel">
+        <section class="section">
+          <div class="section-title">
+            <h2>兵种模板</h2>
+            <span>点击队伍按钮后，在沙盘上落点放置</span>
+          </div>
+          <div id="presetList" class="preset-list"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>标准阵容</h2>
+            <span>按 2026 超级对抗赛常见编组快速铺开</span>
+          </div>
+          <div class="stack-actions">
+            <button id="addRedRosterBtn" class="ghost-btn">添加红方标准阵容</button>
+            <button id="addBlueRosterBtn" class="ghost-btn">添加蓝方标准阵容</button>
+          </div>
+          <p class="help-text">默认含英雄、工程、步兵×2、哨兵。</p>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>战术模式</h2>
+            <span>把当前摆位、路线和时间轴存成可复用模式</span>
+          </div>
+          <label class="field">
+            <span>模式名称</span>
+            <input id="modeNameInput" type="text" maxlength="40" placeholder="例如：开局抢中高地">
+          </label>
+          <div class="stack-actions">
+            <button id="saveModeBtn" class="primary-btn">保存为新模式</button>
+            <button id="updateModeBtn" class="ghost-btn">覆盖选中模式</button>
+            <button id="clearModeSelectionBtn" class="ghost-btn">取消选择</button>
+          </div>
+          <p id="modeLibraryMeta" class="help-text">还没有保存模式，先摆好一套再存。</p>
+          <div id="modeList" class="mode-list empty-list">还没有保存模式，先摆好一套再存。</div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>沙盘设置</h2>
+            <span>支持导入官方地图作为底图</span>
+          </div>
+          <label class="field">
+            <span>场地宽度（米）</span>
+            <input id="boardWidthInput" type="number" min="1" max="100" step="0.5" value="28">
+          </label>
+          <label class="field">
+            <span>场地高度（米）</span>
+            <input id="boardHeightInput" type="number" min="1" max="100" step="0.5" value="15">
+          </label>
+          <label class="field">
+            <span>吸附网格（米）</span>
+            <input id="gridStepInput" type="number" min="0.1" max="10" step="0.1" value="0.5">
+          </label>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input id="showGridInput" type="checkbox" checked>
+              <span>显示网格</span>
+            </label>
+            <label class="toggle">
+              <input id="snapGridInput" type="checkbox" checked>
+              <span>吸附网格</span>
+            </label>
+          </div>
+          <div class="stack-actions">
+            <button id="uploadBackgroundBtn" class="ghost-btn">导入地图底图</button>
+            <button id="clearBackgroundBtn" class="ghost-btn">移除底图</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>方案文件</h2>
+            <span>JSON 可用于保存部署与路线</span>
+          </div>
+          <div class="stack-actions">
+            <button id="importBtn" class="ghost-btn">导入方案</button>
+            <button id="clearBoardBtn" class="danger-btn">清空沙盘</button>
+          </div>
+          <p class="help-text">
+            快捷键：<code>Delete</code> 删除选中对象，<code>Esc</code> 退出放置/绘线模式。
+          </p>
+        </section>
+      </aside>
+
+      <section class="board-panel">
+        <div class="board-toolbar">
+          <div class="toolbar-group">
+            <span id="modeBadge" class="mode-badge">待命</span>
+            <span id="boardHint" class="toolbar-hint">从左侧选择兵种开始布阵。</span>
+          </div>
+          <div class="toolbar-group compact">
+            <span id="cursorMeters">坐标：-</span>
+            <span id="routeCount">路线点：0</span>
+          </div>
+        </div>
+
+        <div id="boardFrame" class="board-frame">
+          <div id="board" class="board">
+            <div class="board-surface">
+              <div class="field-plate field-plate-a"></div>
+              <div class="field-plate field-plate-b"></div>
+              <div class="field-plate field-plate-c"></div>
+              <div id="backgroundImage" class="background-image"></div>
+              <div id="gridLayer" class="grid-layer"></div>
+              <div class="field-lines">
+                <span class="center-line"></span>
+                <span class="spawn spawn-red"></span>
+                <span class="spawn spawn-blue"></span>
+              </div>
+              <svg id="routeLayer" class="route-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="routeArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                    <polygon points="0 0, 7 3.5, 0 7"></polygon>
+                  </marker>
+                </defs>
+              </svg>
+              <div id="unitLayer" class="unit-layer"></div>
+              <div id="ghostMarker" class="ghost-marker hidden"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="board-footer">
+          <p>左侧点兵种后点击沙盘放置；选中单位后可拖动、改名、画路线。</p>
+        </div>
+
+        <section class="timeline-section">
+          <div class="section-title">
+            <h2>比赛时间轴</h2>
+            <span>按 RoboMaster 2026 超级对抗赛 7 分钟比赛阶段整理固定时间节点与条件型增益变化。</span>
+          </div>
+
+          <div class="timeline-head">
+            <div class="timeline-now">
+              <span id="timelineElapsedLabel" class="timeline-badge">已用时 0:00</span>
+              <span id="timelineCountdownLabel" class="timeline-badge ghost">官方倒计时 6:59</span>
+            </div>
+            <label class="timeline-slider-wrap" for="timelineSlider">
+              <span>查看时刻</span>
+              <input id="timelineSlider" type="range" min="0" max="420" step="1" value="0">
+            </label>
+          </div>
+
+          <div id="timelineScale" class="timeline-scale"></div>
+          <div id="timelineLanes" class="timeline-lanes"></div>
+
+          <div class="timeline-summary">
+            <article class="timeline-card">
+              <h3>当前阶段</h3>
+              <div id="timelineActiveList" class="timeline-list"></div>
+            </article>
+            <article class="timeline-card">
+              <h3>关键提示</h3>
+              <div id="timelineEventList" class="timeline-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="terrain-section">
+          <div class="section-title">
+            <h2>场地增益与装配规则</h2>
+            <span>把基地、高地、前哨、堡垒、补给区、装配区和地形跨越增益一起整理成规则卡，写明触发方向、条件和数值。</span>
+          </div>
+          <div id="terrainBuffList" class="terrain-buff-list"></div>
+        </section>
+      </section>
+
+      <aside class="panel detail-panel">
+        <section class="section">
+          <div class="section-title">
+            <h2>对象属性</h2>
+            <span>支持自定义名称、颜色、标记大小</span>
+          </div>
+          <div id="emptyState" class="empty-state">
+            当前未选中对象。点击沙盘上的兵种开始编辑。
+          </div>
+          <div id="detailForm" class="detail-form hidden">
+            <label class="field">
+              <span>名称</span>
+              <input id="unitNameInput" type="text" maxlength="40">
+            </label>
+            <label class="field">
+              <span>兵种</span>
+              <input id="unitTypeInput" type="text" maxlength="20">
+            </label>
+            <label class="field">
+              <span>阵营</span>
+              <select id="unitTeamInput">
+                <option value="red">红方</option>
+                <option value="blue">蓝方</option>
+                <option value="neutral">中立</option>
+              </select>
+            </label>
+            <div class="split-fields">
+              <label class="field">
+                <span>图标</span>
+                <input id="unitTokenInput" type="text" maxlength="4">
+              </label>
+              <label class="field">
+                <span>标记尺寸</span>
+                <input id="unitSizeInput" type="range" min="36" max="84" step="2" value="54">
+              </label>
+            </div>
+            <div class="split-fields">
+              <label class="field">
+                <span>单位颜色</span>
+                <input id="unitColorInput" type="color" value="#ef5a43">
+              </label>
+              <label class="field">
+                <span>路线颜色</span>
+                <input id="routeColorInput" type="color" value="#ef5a43">
+              </label>
+            </div>
+            <label class="field">
+              <span>备注</span>
+              <textarea id="unitNoteInput" rows="3" maxlength="200"></textarea>
+            </label>
+            <div class="meta-row">
+              <span id="selectedCoords">位置：-</span>
+              <span id="selectedRouteMeta">路线点：0</span>
+            </div>
+            <div class="stack-actions">
+              <button id="duplicateBtn" class="ghost-btn">复制对象</button>
+              <button id="deleteBtn" class="danger-btn">删除对象</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>路线编辑</h2>
+            <span>以选中对象为起点绘制运动路线</span>
+          </div>
+          <div class="stack-actions">
+            <button id="drawRouteBtn" class="primary-btn">开始绘线</button>
+            <button id="finishRouteBtn" class="ghost-btn">完成绘线</button>
+          </div>
+          <div class="stack-actions">
+            <button id="undoPointBtn" class="ghost-btn">撤销一个点</button>
+            <button id="clearRouteBtn" class="ghost-btn">清空路线</button>
+          </div>
+          <p class="help-text">绘线模式下点击沙盘添加路线点，拖动兵种可调整起始位置。</p>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>沙盘图标</h2>
+            <span>中间大地图只显示 1 / 2 / 3 / 4 / 哨，并支持自定义图标</span>
+          </div>
+          <div id="iconSlotList" class="icon-slot-list"></div>
+          <p class="help-text">你可以给 1、2、3、4、哨分别插入自己的图标；未上传时会在大地图上显示文字占位。</p>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h2>对象清单</h2>
+            <span>便于快速切换选中对象</span>
+          </div>
+          <div id="unitList" class="unit-list empty-list">还没有兵种，先放一个试试。</div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <input id="backgroundInput" type="file" accept="image/*" hidden>
+  <input id="importInput" type="file" accept=".json,application/json" hidden>
+  <input id="boardIconInput" type="file" accept="image/*" hidden>
+
+  <script src="bundle-source.js"></script>
+  <script src="bundle-state.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
