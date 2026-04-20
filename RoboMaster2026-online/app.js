@@ -23,11 +23,14 @@ const LEGACY_STORAGE_KEY = "rm2026-sandbox-state";
 const STORAGE_KEY_PREFIX = "rm2026-sandbox-state::";
 const SUPABASE_URL = "https://jbiedctytmrxzelmdwxg.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_uJzr69moclWUdROUr5Q4tg_ge3r-PN5";
+const MANUAL_SYNC_TABLE = "rm_rooms_v2";
+const FAST_POSITION_SYNC_MODE = true;
 const ROOM_ID = (() => {
   const value = new URLSearchParams(window.location.search).get("room") || "public-demo";
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
   return sanitized || "public-demo";
 })();
+const MANUAL_SYNC_MODE = true;
 const IS_LOCAL_PREVIEW = ["127.0.0.1", "localhost"].includes(window.location.hostname);
 const REALTIME_PREF_KEY = "rm2026-online-realtime-enabled";
 const ENABLE_REALTIME = (() => {
@@ -316,6 +319,8 @@ let roomChannel = null;
 let realtimeEnabled = ENABLE_REALTIME;
 let isPushInFlight = false;
 let hasPendingPush = false;
+let manualSyncBaselineDoc = null;
+let syncProgressHideTimer = null;
 
 let pendingBoardIconSlot = null;
 
@@ -380,7 +385,11 @@ const refs = {
   seedDemoBtn: document.querySelector("#seedDemoBtn"),
   addRedRosterBtn: document.querySelector("#addRedRosterBtn"),
   addBlueRosterBtn: document.querySelector("#addBlueRosterBtn"),
-  realtimeToggleBtn: document.querySelector("#realtimeToggleBtn"),
+  syncPushBtn: document.querySelector("#syncPushBtn"),
+  syncPullBtn: document.querySelector("#syncPullBtn"),
+  syncProgressWrap: document.querySelector("#syncProgressWrap"),
+  syncProgressBar: document.querySelector("#syncProgressBar"),
+  syncProgressLabel: document.querySelector("#syncProgressLabel"),
   goHomeBtn: document.querySelector("#goHomeBtn"),
   uploadBackgroundBtn: document.querySelector("#uploadBackgroundBtn"),
   clearBackgroundBtn: document.querySelector("#clearBackgroundBtn"),
@@ -401,6 +410,54 @@ function cloneValue(value) {
     return structuredClone(value);
   }
   return JSON.parse(JSON.stringify(value));
+}
+
+function showSyncProgress(label, percent = 0) {
+  if (!refs.syncProgressWrap || !refs.syncProgressBar || !refs.syncProgressLabel) {
+    return;
+  }
+  if (syncProgressHideTimer) {
+    clearTimeout(syncProgressHideTimer);
+    syncProgressHideTimer = null;
+  }
+  refs.syncProgressWrap.classList.remove("hidden", "fail");
+  refs.syncProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  refs.syncProgressLabel.textContent = label;
+}
+
+function updateSyncProgress(label, percent) {
+  if (!refs.syncProgressWrap || !refs.syncProgressBar || !refs.syncProgressLabel) {
+    return;
+  }
+  refs.syncProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  refs.syncProgressLabel.textContent = label;
+}
+
+function completeSyncProgress(label) {
+  if (!refs.syncProgressWrap || !refs.syncProgressBar || !refs.syncProgressLabel) {
+    return;
+  }
+  refs.syncProgressWrap.classList.remove("fail");
+  refs.syncProgressBar.style.width = "100%";
+  refs.syncProgressLabel.textContent = label;
+  syncProgressHideTimer = setTimeout(() => {
+    if (!refs.syncProgressWrap) {
+      return;
+    }
+    refs.syncProgressWrap.classList.add("hidden");
+    refs.syncProgressBar.style.width = "0%";
+    refs.syncProgressLabel.textContent = "准备中...";
+    syncProgressHideTimer = null;
+  }, 900);
+}
+
+function failSyncProgress(label) {
+  if (!refs.syncProgressWrap || !refs.syncProgressBar || !refs.syncProgressLabel) {
+    return;
+  }
+  refs.syncProgressWrap.classList.add("fail");
+  refs.syncProgressBar.style.width = "100%";
+  refs.syncProgressLabel.textContent = label;
 }
 
 function isPortableBundlePage() {
@@ -969,6 +1026,87 @@ function toSnapshotText(payload) {
   return JSON.stringify(stablePayload);
 }
 
+function createManualSyncPayload() {
+  const payload = createPortablePayload();
+
+  // Keep collaboration payload lightweight.
+  // Fast mode focuses on unit/timeline synchronization and skips heavy assets.
+  if (FAST_POSITION_SYNC_MODE) {
+    payload.board = {
+      ...payload.board,
+      backgroundImage: "",
+    };
+    payload.modes = [];
+    payload.selectedModeId = null;
+    payload.modeDraftName = "";
+  }
+
+  payload.boardIcons = Object.keys(payload.boardIcons || {}).reduce((acc, key) => {
+    acc[key] = "";
+    return acc;
+  }, {});
+
+  return payload;
+}
+
+function payloadToManualSyncDoc(payload) {
+  return {
+    board: cloneValue(payload && payload.board ? payload.board : createDefaultBoardState()),
+    timeline_seconds: Number(payload && payload.timelineSeconds) || 0,
+    units: cloneValue(Array.isArray(payload && payload.units) ? payload.units : []),
+    modes: cloneValue(Array.isArray(payload && payload.modes) ? payload.modes : []),
+    selected_mode_id: payload && typeof payload.selectedModeId === "string" ? payload.selectedModeId : null,
+    mode_draft_name: payload && typeof payload.modeDraftName === "string" ? payload.modeDraftName : "",
+  };
+}
+
+function manualSyncDocToPayload(doc) {
+  return {
+    savedAt: new Date().toISOString(),
+    app: "RoboMaster 2026 Tactical Sandbox",
+    board: cloneValue(doc && doc.board ? doc.board : createDefaultBoardState()),
+    boardIcons: {},
+    timelineSeconds: Number(doc && doc.timeline_seconds) || 0,
+    units: cloneValue(Array.isArray(doc && doc.units) ? doc.units : []),
+    modes: cloneValue(Array.isArray(doc && doc.modes) ? doc.modes : []),
+    selectedModeId: doc && typeof doc.selected_mode_id === "string" ? doc.selected_mode_id : null,
+    modeDraftName: doc && typeof doc.mode_draft_name === "string" ? doc.mode_draft_name : "",
+  };
+}
+
+function buildManualSyncPatch(nextDoc) {
+  if (!manualSyncBaselineDoc) {
+    return cloneValue(nextDoc);
+  }
+
+  const keys = FAST_POSITION_SYNC_MODE
+    ? ["timeline_seconds", "units"]
+    : ["board", "timeline_seconds", "units", "modes", "selected_mode_id", "mode_draft_name"];
+  const patch = {};
+  keys.forEach((key) => {
+    if (JSON.stringify(nextDoc[key]) !== JSON.stringify(manualSyncBaselineDoc[key])) {
+      patch[key] = cloneValue(nextDoc[key]);
+    }
+  });
+  return patch;
+}
+
+async function withTimeout(promise, ms, label) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function updateRealtimeToggleButton() {
   if (!refs.realtimeToggleBtn) {
     return;
@@ -992,6 +1130,9 @@ function disconnectRealtimeChannel() {
 }
 
 function scheduleRealtimeSync() {
+  if (MANUAL_SYNC_MODE) {
+    return;
+  }
   if (!realtimeEnabled || !supabaseClient) {
     return;
   }
@@ -1113,27 +1254,206 @@ function subscribeRoomChanges() {
     .subscribe();
 }
 
-async function initRealtimeCollaboration() {
-  if (!realtimeEnabled) {
-    disconnectRealtimeChannel();
-    refs.boardHint.textContent = `房间：${ROOM_ID}（本地演示模式，实时协作已关闭）`;
-    return;
-  }
-
+async function pushStateManually() {
   if (!supabaseClient) {
-    refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作库未加载，当前仅本地模式）`;
+    refs.boardHint.textContent = `房间：${ROOM_ID}（上传失败：同步服务未加载）`;
+    failSyncProgress("上传失败：同步服务未加载");
     return;
   }
 
+  if (remoteVersion < 0) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（请先点“手动刷新同步”再上传）`;
+    failSyncProgress("请先刷新后再上传");
+    return;
+  }
+
+  showSyncProgress("准备上传...", 10);
+  const payload = createManualSyncPayload();
+  const nextDoc = payloadToManualSyncDoc(payload);
+  const patch = buildManualSyncPatch(nextDoc);
+  const patchFields = Object.keys(patch);
+  if (!patchFields.length) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（没有改动，无需上传）`;
+    completeSyncProgress("没有改动");
+    return;
+  }
+
+  const payloadSizeKb = Math.round(new Blob([JSON.stringify(patch)]).size / 1024);
+  updateSyncProgress(`上传中... ${payloadSizeKb}KB`, 30);
+  refs.boardHint.textContent = `房间：${ROOM_ID}（正在上传... ${payloadSizeKb}KB / ${patchFields.length}项）`;
+
+  let data = null;
+  let error = null;
   try {
-    disconnectRealtimeChannel();
-    await ensureRoomExists();
-    await loadRoomState();
-    subscribeRoomChanges();
-    refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作已连接）`;
+    updateSyncProgress(`提交请求... ${patchFields.length}项`, 55);
+    const result = await withTimeout(
+      supabaseClient
+        .from(MANUAL_SYNC_TABLE)
+        .update(patch)
+        .eq("room_id", ROOM_ID)
+        .eq("version", remoteVersion)
+        .select("version"),
+      12000,
+      "manual push"
+    );
+    data = result.data;
+    error = result.error;
+  } catch (timeoutError) {
+    console.warn("手动上传超时", timeoutError);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（上传超时，请重试）`;
+    failSyncProgress("上传超时");
+    return;
+  }
+
+  if (error) {
+    console.warn("手动上传失败", error);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（上传失败）`;
+    failSyncProgress("上传失败");
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（远端已变更，请先“手动刷新同步”）`;
+    failSyncProgress("远端已变更，请先刷新");
+    return;
+  }
+
+  updateSyncProgress("写入完成，更新本地状态...", 85);
+  remoteVersion = Number(data[0].version) || remoteVersion;
+  manualSyncBaselineDoc = nextDoc;
+  lastSyncedSnapshot = toSnapshotText(payload);
+  refs.boardHint.textContent = `房间：${ROOM_ID}（已手动上传，约 ${payloadSizeKb}KB）`;
+  completeSyncProgress("上传完成");
+}
+
+async function pullStateManually() {
+  if (!supabaseClient) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（刷新失败：同步服务未加载）`;
+    failSyncProgress("刷新失败：同步服务未加载");
+    return;
+  }
+
+  showSyncProgress("准备刷新...", 10);
+  refs.boardHint.textContent = `房间：${ROOM_ID}（正在刷新...）`;
+  const fetchRoomDoc = async () => withTimeout(
+    supabaseClient
+      .from(MANUAL_SYNC_TABLE)
+      .select("version,board,timeline_seconds,units,modes,selected_mode_id,mode_draft_name")
+      .eq("room_id", ROOM_ID)
+      .single(),
+    12000,
+    "manual pull"
+  );
+
+  let data = null;
+  let error = null;
+  try {
+    updateSyncProgress("读取远端数据...", 35);
+    const result = await fetchRoomDoc();
+    data = result.data;
+    error = result.error;
+  } catch (timeoutError) {
+    console.warn("手动刷新超时", timeoutError);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（刷新超时，请重试）`;
+    failSyncProgress("刷新超时");
+    return;
+  }
+
+  // Auto-bootstrap room when not found.
+  const isNoRow = error && (error.code === "PGRST116" || /0 rows|No rows/i.test(String(error.message)));
+  if (isNoRow) {
+    try {
+      const seed = payloadToManualSyncDoc(createManualSyncPayload());
+      updateSyncProgress("远端无房间，正在初始化...", 45);
+      await withTimeout(
+        supabaseClient
+          .from(MANUAL_SYNC_TABLE)
+          .upsert({ room_id: ROOM_ID, ...seed }, { onConflict: "room_id", ignoreDuplicates: true }),
+        12000,
+        "manual pull bootstrap"
+      );
+      updateSyncProgress("重新读取远端数据...", 65);
+      const retry = await fetchRoomDoc();
+      data = retry.data;
+      error = retry.error;
+    } catch (bootstrapError) {
+      console.warn("手动刷新自初始化失败", bootstrapError);
+      refs.boardHint.textContent = `房间：${ROOM_ID}（刷新失败：房间初始化失败）`;
+      failSyncProgress("刷新失败：房间初始化失败");
+      return;
+    }
+  }
+
+  if (error || !data) {
+    console.warn("手动刷新失败", error);
+    const isMissingTable = error && /rm_rooms_v2|does not exist|relation/i.test(String(error.message));
+    refs.boardHint.textContent = isMissingTable
+      ? `房间：${ROOM_ID}（刷新失败：请先执行 v2 SQL）`
+      : `房间：${ROOM_ID}（刷新失败或房间无数据）`;
+    failSyncProgress(isMissingTable ? "刷新失败：未执行 v2 SQL" : "刷新失败");
+    return;
+  }
+
+  const doc = {
+    board: data.board,
+    timeline_seconds: data.timeline_seconds,
+    units: data.units,
+    modes: data.modes,
+    selected_mode_id: data.selected_mode_id,
+    mode_draft_name: data.mode_draft_name,
+  };
+  const mergedState = manualSyncDocToPayload(doc);
+  if (FAST_POSITION_SYNC_MODE) {
+    mergedState.board = cloneValue(state.board);
+    mergedState.modes = cloneValue(state.modes);
+    mergedState.selectedModeId = state.selectedModeId;
+    mergedState.modeDraftName = state.modeDraftName;
+  } else if (!mergedState.board.backgroundImage && state.board && state.board.backgroundImage) {
+    mergedState.board.backgroundImage = state.board.backgroundImage;
+  }
+  mergedState.boardIcons = { ...(state.boardIcons || {}) };
+
+  updateSyncProgress("应用到本地...", 80);
+  isApplyingRemote = true;
+  applyAppPayload(mergedState);
+  isApplyingRemote = false;
+  remoteVersion = Number(data.version) || remoteVersion;
+  manualSyncBaselineDoc = payloadToManualSyncDoc(mergedState);
+  lastSyncedSnapshot = toSnapshotText(mergedState);
+  persistToLocal();
+  refs.boardHint.textContent = `房间：${ROOM_ID}（已手动刷新）`;
+  completeSyncProgress("刷新完成");
+}
+
+async function bootstrapManualSync() {
+  if (!MANUAL_SYNC_MODE || !supabaseClient) {
+    return;
+  }
+  try {
+    const seed = payloadToManualSyncDoc(createManualSyncPayload());
+    await supabaseClient
+      .from(MANUAL_SYNC_TABLE)
+      .upsert({ room_id: ROOM_ID, ...seed }, { onConflict: "room_id", ignoreDuplicates: true });
+
+    const { data, error } = await supabaseClient
+      .from(MANUAL_SYNC_TABLE)
+      .select("version,board,timeline_seconds,units,modes,selected_mode_id,mode_draft_name")
+      .eq("room_id", ROOM_ID)
+      .single();
+    if (!error && data) {
+      remoteVersion = Number(data.version) || 0;
+      manualSyncBaselineDoc = {
+        board: data.board,
+        timeline_seconds: data.timeline_seconds,
+        units: data.units,
+        modes: data.modes,
+        selected_mode_id: data.selected_mode_id,
+        mode_draft_name: data.mode_draft_name,
+      };
+    }
   } catch (error) {
-    console.warn("实时协作初始化失败", error);
-    refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作连接失败）`;
+    console.warn("初始化手动同步失败", error);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（手动同步初始化失败，请先执行 Supabase v2 SQL）`;
   }
 }
 
@@ -2457,24 +2777,14 @@ function bindActions() {
     refs.boardHint.textContent = "已恢复到内置默认方案。";
   });
   refs.exportOfflineBtn.addEventListener("click", exportOfflinePackage);
-  if (refs.realtimeToggleBtn) {
-    updateRealtimeToggleButton();
-    refs.realtimeToggleBtn.addEventListener("click", () => {
-      realtimeEnabled = !realtimeEnabled;
-      try {
-        localStorage.setItem(REALTIME_PREF_KEY, realtimeEnabled ? "1" : "0");
-      } catch (error) {
-        console.warn("保存实时协作偏好失败", error);
-      }
-      updateRealtimeToggleButton();
-
-      if (!realtimeEnabled) {
-        disconnectRealtimeChannel();
-        refs.boardHint.textContent = `房间：${ROOM_ID}（实时协作已手动关闭）`;
-        return;
-      }
-
-      void initRealtimeCollaboration();
+  if (refs.syncPushBtn) {
+    refs.syncPushBtn.addEventListener("click", () => {
+      void pushStateManually();
+    });
+  }
+  if (refs.syncPullBtn) {
+    refs.syncPullBtn.addEventListener("click", () => {
+      void pullStateManually();
     });
   }
   if (refs.goHomeBtn) {
@@ -2602,7 +2912,10 @@ function init() {
     applyAppPayload(getBundledPackagePayload(), { renderUI: false });
   }
   render();
-  void initRealtimeCollaboration();
+  refs.boardHint.textContent = FAST_POSITION_SYNC_MODE
+    ? `房间：${ROOM_ID}（位置极速同步：仅单位/时间轴）`
+    : `房间：${ROOM_ID}（手动同步模式：上传/刷新）`;
+  void bootstrapManualSync();
 }
 
 init();

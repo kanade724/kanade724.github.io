@@ -254,6 +254,39 @@ button:active {
   padding: 18px 20px 12px;
 }
 
+.sync-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0 20px 10px;
+}
+
+.sync-progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(108, 77, 39, 0.14);
+  overflow: hidden;
+}
+
+.sync-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #b96818, #d08a34);
+  transition: width 0.22s ease;
+}
+
+.sync-progress.fail .sync-progress-bar {
+  background: linear-gradient(135deg, #b84639, #d06350);
+}
+
+.sync-progress-label {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .toolbar-group {
   align-items: center;
   flex-wrap: wrap;

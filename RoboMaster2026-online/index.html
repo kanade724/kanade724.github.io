@@ -15,7 +15,8 @@
         <p class="subtitle">在线版：随时打开即可推演与复盘；同时保留离线包导出能力。</p>
       </div>
       <div class="topbar-actions">
-        <button id="realtimeToggleBtn" class="ghost-btn">实时协作：关</button>
+        <button id="syncPushBtn" class="ghost-btn">手动上传同步</button>
+        <button id="syncPullBtn" class="ghost-btn">手动刷新同步</button>
         <button id="goHomeBtn" class="ghost-btn">返回个人主页</button>
         <button id="seedDemoBtn" class="ghost-btn">示例部署</button>
         <button id="loadBundleBtn" class="ghost-btn">恢复内置默认方案</button>
@@ -123,6 +124,12 @@
             <span id="cursorMeters">坐标：-</span>
             <span id="routeCount">路线点：0</span>
           </div>
+        </div>
+        <div id="syncProgressWrap" class="sync-progress hidden" aria-live="polite">
+          <div class="sync-progress-track">
+            <div id="syncProgressBar" class="sync-progress-bar"></div>
+          </div>
+          <span id="syncProgressLabel" class="sync-progress-label">准备中...</span>
         </div>
 
         <div id="boardFrame" class="board-frame">
@@ -300,6 +307,6 @@
   <script src="bundle-source.js"></script>
   <script src="bundle-state.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=manual-sync-20260420"></script>
 </body>
 </html>
