@@ -28,6 +28,7 @@ const FAST_POSITION_SYNC_MODE = true;
 const MANUAL_SYNC_TIMEOUT_BASE_MS = 12000;
 const MANUAL_SYNC_TIMEOUT_MAX_MS = 90000;
 const MANUAL_SYNC_TIMEOUT_PER_KB_MS = 20;
+const DEFAULT_FORCE_UPLOAD_PASSWORD = "123";
 const ROOM_ID = (() => {
   const value = new URLSearchParams(window.location.search).get("room") || "public-demo";
   const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
@@ -395,8 +396,10 @@ const refs = {
   addRedRosterBtn: document.querySelector("#addRedRosterBtn"),
   addBlueRosterBtn: document.querySelector("#addBlueRosterBtn"),
   syncPushBtn: document.querySelector("#syncPushBtn"),
+  syncForcePushBtn: document.querySelector("#syncForcePushBtn"),
   syncPullBtn: document.querySelector("#syncPullBtn"),
   syncPushBtnMode: document.querySelector("#syncPushBtnMode"),
+  syncForcePushBtnMode: document.querySelector("#syncForcePushBtnMode"),
   syncPullBtnMode: document.querySelector("#syncPullBtnMode"),
   syncProgressWrap: document.querySelector("#syncProgressWrap"),
   syncProgressBar: document.querySelector("#syncProgressBar"),
@@ -1306,20 +1309,86 @@ function subscribeRoomChanges() {
     .subscribe();
 }
 
-async function pushStateManually() {
+function isNoRowError(error) {
+  return Boolean(error && (error.code === "PGRST116" || /0 rows|No rows/i.test(String(error.message))));
+}
+
+async function fetchForceUploadPassword() {
+  if (!supabaseClient) {
+    return null;
+  }
+
+  const fetchPassword = async () => withTimeout(
+    supabaseClient
+      .from(MANUAL_SYNC_TABLE)
+      .select("sync_password")
+      .eq("room_id", ROOM_ID)
+      .single(),
+    12000,
+    "force password fetch"
+  );
+
+  let data = null;
+  let error = null;
+  try {
+    const result = await fetchPassword();
+    data = result.data;
+    error = result.error;
+  } catch (timeoutError) {
+    console.warn("读取强制上传密码超时", timeoutError);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败：读取密码超时）`;
+    failSyncProgress("强制上传失败：读取密码超时");
+    return null;
+  }
+
+  if (isNoRowError(error)) {
+    try {
+      await withTimeout(
+        supabaseClient
+          .from(MANUAL_SYNC_TABLE)
+          .upsert({ room_id: ROOM_ID, sync_password: DEFAULT_FORCE_UPLOAD_PASSWORD }, { onConflict: "room_id" }),
+        12000,
+        "force password bootstrap"
+      );
+      const retry = await fetchPassword();
+      data = retry.data;
+      error = retry.error;
+    } catch (bootstrapError) {
+      console.warn("强制上传密码初始化失败", bootstrapError);
+      refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败：密码初始化失败）`;
+      failSyncProgress("强制上传失败：密码初始化失败");
+      return null;
+    }
+  }
+
+  if (error || !data) {
+    console.warn("读取强制上传密码失败", error);
+    const isMissingColumn = error && /sync_password|column/i.test(String(error.message));
+    refs.boardHint.textContent = isMissingColumn
+      ? `房间：${ROOM_ID}（强制上传失败：请执行最新 SQL）`
+      : `房间：${ROOM_ID}（强制上传失败：读取密码失败）`;
+    failSyncProgress(isMissingColumn ? "强制上传失败：未执行最新 SQL" : "强制上传失败：读取密码失败");
+    return null;
+  }
+
+  return String(data.sync_password ?? DEFAULT_FORCE_UPLOAD_PASSWORD);
+}
+
+async function pushStateManually(options = {}) {
+  const { force = false } = options;
   if (!supabaseClient) {
     refs.boardHint.textContent = `房间：${ROOM_ID}（上传失败：同步服务未加载）`;
     failSyncProgress("上传失败：同步服务未加载");
     return;
   }
 
-  if (remoteVersion < 0) {
+  if (!force && remoteVersion < 0) {
     refs.boardHint.textContent = `房间：${ROOM_ID}（请先点“刷新”再上传）`;
     failSyncProgress("请先刷新后再上传");
     return;
   }
 
-  showSyncProgress("准备上传...", 10);
+  showSyncProgress(force ? "准备强制上传..." : "准备上传...", 10);
   const payload = createManualSyncPayload();
   const nextDoc = payloadToManualSyncDoc(payload);
   const patch = buildManualSyncPatch(nextDoc);
@@ -1331,52 +1400,105 @@ async function pushStateManually() {
   }
 
   const payloadSizeKb = Math.round(new Blob([JSON.stringify(patch)]).size / 1024);
-  updateSyncProgress(`上传中... ${payloadSizeKb}KB`, 30);
-  refs.boardHint.textContent = `房间：${ROOM_ID}（正在上传... ${payloadSizeKb}KB / ${patchFields.length}项）`;
+  updateSyncProgress(`${force ? "强制上传中" : "上传中"}... ${payloadSizeKb}KB`, 30);
+  refs.boardHint.textContent = `房间：${ROOM_ID}（正在${force ? "强制上传" : "上传"}... ${payloadSizeKb}KB / ${patchFields.length}项）`;
   const timeoutMs = calcManualSyncTimeoutMs(payloadSizeKb, patchFields.includes("modes"));
 
   let data = null;
   let error = null;
   try {
     updateSyncProgress(`提交请求... ${patchFields.length}项`, 55);
-    const result = await withTimeout(
-      supabaseClient
-        .from(MANUAL_SYNC_TABLE)
-        .update(patch)
-        .eq("room_id", ROOM_ID)
-        .eq("version", remoteVersion)
-        .select("version"),
-      timeoutMs,
-      "manual push"
-    );
+    const query = supabaseClient
+      .from(MANUAL_SYNC_TABLE)
+      .update(patch)
+      .eq("room_id", ROOM_ID);
+    if (!force) {
+      query.eq("version", remoteVersion);
+    }
+
+    const result = await withTimeout(query.select("version"), timeoutMs, "manual push");
     data = result.data;
     error = result.error;
   } catch (timeoutError) {
-    console.warn("手动上传超时", timeoutError);
-    refs.boardHint.textContent = `房间：${ROOM_ID}（上传超时，请重试）`;
-    failSyncProgress("上传超时");
+    console.warn(force ? "强制上传超时" : "手动上传超时", timeoutError);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（${force ? "强制上传" : "上传"}超时，请重试）`;
+    failSyncProgress(`${force ? "强制上传" : "上传"}超时`);
     return;
   }
 
   if (error) {
-    console.warn("手动上传失败", error);
-    refs.boardHint.textContent = `房间：${ROOM_ID}（上传失败）`;
-    failSyncProgress("上传失败");
+    console.warn(force ? "强制上传失败" : "手动上传失败", error);
+    refs.boardHint.textContent = `房间：${ROOM_ID}（${force ? "强制上传" : "上传"}失败）`;
+    failSyncProgress(`${force ? "强制上传" : "上传"}失败`);
     return;
   }
 
   if (!data || data.length === 0) {
+    if (force) {
+      try {
+        updateSyncProgress("未找到房间，正在强制初始化...", 70);
+        const seedResult = await withTimeout(
+          supabaseClient
+            .from(MANUAL_SYNC_TABLE)
+            .upsert({ room_id: ROOM_ID, ...nextDoc }, { onConflict: "room_id" })
+            .select("version")
+            .single(),
+          timeoutMs,
+          "force push bootstrap"
+        );
+        data = seedResult.data ? [seedResult.data] : [];
+        error = seedResult.error;
+      } catch (bootstrapError) {
+        console.warn("强制上传初始化失败", bootstrapError);
+        refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败）`;
+        failSyncProgress("强制上传失败");
+        return;
+      }
+      if (error || !data || data.length === 0) {
+        console.warn("强制上传写入失败", error);
+        refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败）`;
+        failSyncProgress("强制上传失败");
+        return;
+      }
+    } else {
     refs.boardHint.textContent = `房间：${ROOM_ID}（远端已变更，请先“刷新”）`;
     failSyncProgress("远端已变更，请先刷新");
     return;
+    }
   }
 
   updateSyncProgress("写入完成，更新本地状态...", 85);
   remoteVersion = Number(data[0].version) || remoteVersion;
   manualSyncBaselineDoc = nextDoc;
   lastSyncedSnapshot = toSnapshotText(payload);
-  refs.boardHint.textContent = `房间：${ROOM_ID}（已上传，约 ${payloadSizeKb}KB）`;
-  completeSyncProgress("上传完成");
+  refs.boardHint.textContent = `房间：${ROOM_ID}（已${force ? "强制上传" : "上传"}，约 ${payloadSizeKb}KB）`;
+  completeSyncProgress(`${force ? "强制上传" : "上传"}完成`);
+}
+
+async function forcePushStateManually() {
+  if (!supabaseClient) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败：同步服务未加载）`;
+    failSyncProgress("强制上传失败：同步服务未加载");
+    return;
+  }
+
+  const typedPassword = window.prompt("请输入强制上传密码");
+  if (typedPassword === null) {
+    return;
+  }
+
+  showSyncProgress("校验强制上传密码...", 6);
+  const expectedPassword = await fetchForceUploadPassword();
+  if (expectedPassword === null) {
+    return;
+  }
+  if (String(typedPassword) !== expectedPassword) {
+    refs.boardHint.textContent = `房间：${ROOM_ID}（强制上传失败：密码错误）`;
+    failSyncProgress("强制上传失败：密码错误");
+    return;
+  }
+
+  await pushStateManually({ force: true });
 }
 
 async function pullStateManually() {
@@ -2829,10 +2951,15 @@ function bindActions() {
     refs.boardHint.textContent = "已恢复到内置默认方案。";
   });
   refs.exportOfflineBtn.addEventListener("click", exportOfflinePackage);
-  const bindSyncButtons = (pushBtn, pullBtn) => {
+  const bindSyncButtons = (pushBtn, forcePushBtn, pullBtn) => {
     if (pushBtn) {
       pushBtn.addEventListener("click", () => {
         void pushStateManually();
+      });
+    }
+    if (forcePushBtn) {
+      forcePushBtn.addEventListener("click", () => {
+        void forcePushStateManually();
       });
     }
     if (pullBtn) {
@@ -2841,8 +2968,8 @@ function bindActions() {
       });
     }
   };
-  bindSyncButtons(refs.syncPushBtn, refs.syncPullBtn);
-  bindSyncButtons(refs.syncPushBtnMode, refs.syncPullBtnMode);
+  bindSyncButtons(refs.syncPushBtn, refs.syncForcePushBtn, refs.syncPullBtn);
+  bindSyncButtons(refs.syncPushBtnMode, refs.syncForcePushBtnMode, refs.syncPullBtnMode);
   if (refs.goHomeBtn) {
     refs.goHomeBtn.addEventListener("click", () => {
       window.location.href = "../index.html";

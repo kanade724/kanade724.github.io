@@ -535,7 +535,8 @@ button:active {
 }
 
 .sync-actions .primary-btn,
-.sync-actions .ghost-btn {
+.sync-actions .ghost-btn,
+.sync-actions .danger-btn {
   min-width: 144px;
 }
 
@@ -1199,7 +1200,8 @@ code {
   }
 
   .sync-actions .primary-btn,
-  .sync-actions .ghost-btn {
+  .sync-actions .ghost-btn,
+  .sync-actions .danger-btn {
     width: 100%;
     min-height: 44px;
   }

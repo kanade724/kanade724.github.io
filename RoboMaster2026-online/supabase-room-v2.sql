@@ -9,9 +9,13 @@ create table if not exists public.rm_rooms_v2 (
   modes jsonb not null default '[]'::jsonb,
   selected_mode_id text,
   mode_draft_name text not null default '',
+  sync_password text not null default '123',
   version bigint not null default 0,
   updated_at timestamptz not null default now()
 );
+
+alter table public.rm_rooms_v2
+  add column if not exists sync_password text not null default '123';
 
 create or replace function public.rm_rooms_v2_touch()
 returns trigger
