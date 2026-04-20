@@ -527,6 +527,18 @@ button:active {
   padding: 0 20px 18px;
 }
 
+.sync-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.sync-actions .primary-btn,
+.sync-actions .ghost-btn {
+  min-width: 144px;
+}
+
 .timeline-section {
   margin: 0 20px 20px;
   padding: 18px;
@@ -1179,6 +1191,17 @@ code {
   .timeline-lane {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .sync-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .sync-actions .primary-btn,
+  .sync-actions .ghost-btn {
+    width: 100%;
+    min-height: 44px;
   }
 
   .timeline-scale {

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RoboMaster 2026 战术沙盘 · Online</title>
+  <link rel="icon" type="image/png" href="../favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -15,8 +16,6 @@
         <p class="subtitle">在线版：随时打开即可推演与复盘；同时保留离线包导出能力。</p>
       </div>
       <div class="topbar-actions">
-        <button id="syncPushBtn" class="ghost-btn">手动上传同步</button>
-        <button id="syncPullBtn" class="ghost-btn">手动刷新同步</button>
         <button id="goHomeBtn" class="ghost-btn">返回个人主页</button>
         <button id="seedDemoBtn" class="ghost-btn">示例部署</button>
         <button id="loadBundleBtn" class="ghost-btn">恢复内置默认方案</button>
@@ -159,6 +158,10 @@
         </div>
 
         <div class="board-footer">
+          <div class="sync-actions">
+            <button id="syncPushBtn" class="primary-btn">手动上传同步</button>
+            <button id="syncPullBtn" class="ghost-btn">手动刷新同步</button>
+          </div>
           <p>左侧点兵种后点击沙盘放置；选中单位后可拖动、改名、画路线。</p>
         </div>
 
