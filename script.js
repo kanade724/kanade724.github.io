@@ -92,7 +92,9 @@
     revealNodes.forEach((el) => io.observe(el));
   }
 
-  const navLinks = Array.from(document.querySelectorAll(".nav a"));
+  const navLinks = Array.from(document.querySelectorAll(".nav a")).filter((link) =>
+    link.getAttribute("href").startsWith("#")
+  );
   const sections = navLinks
     .map((link) => document.querySelector(link.getAttribute("href")))
     .filter(Boolean);
